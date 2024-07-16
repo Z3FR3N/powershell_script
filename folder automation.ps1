@@ -349,6 +349,20 @@ function Save-File(){
 
 }
 
+Function RemoveInvalidChars {
+    param(
+      [Parameter(Mandatory=$true,
+        Position=0,
+        ValueFromPipeline=$true,
+        ValueFromPipelineByPropertyName=$true)]
+      [String]$Name
+    )
+  
+    $invalidChars = [IO.Path]::GetInvalidFileNameChars() -join ''
+    $re = "[{0}]" -f [RegEx]::Escape($invalidChars)
+    return ($Name -replace $re)
+  }
+
 function ListingFiles {
     <#
     .SYNOPSIS
@@ -563,20 +577,31 @@ function  ChangingFileNames {
                 $file_name = $_.Name.ToString().ToLower()
                 $old_name = $row.$oldname_col.ToString().Trim().ToLower()
 
-                if($old_name -eq $file_name){
-                    $new_name = $row.$new_name_col.Trim() # trimmed version to avoid extra spaces
-                    if ($new_name.Contains(".")) { 
+                if ([string]::IsNullOrWhiteSpace($file_name)) {
+                
+                    Write-Host $file_name "SALTATO POICHE' NULLO"
+                    continue
+                
+                } elseif($old_name -eq $file_name){
+                    
+                    if([string]::IsNullOrWhiteSpace($new_name)) {
+                        Write-Host `"$new_name`" "NON VALIDO COME NOME"
+                        continue
+                    }elseif ($new_name.Contains(".")) { 
                         $new_name = $new_name.Split(".")[0]
                     }
+
+                    $new_name = $row.$new_name_col.Trim()
+                    $new_name = RemoveInvalidChars $new_name
                     $complete_name = "{0}{1}" -f $new_name, $_.Extension
                     $n_file++
                     Rename-Item -Path ($folder + "\" + $_.Name) -NewName $complete_name
+                    Write-Host $_.Name "RINOMINATO IN" $complete_name
                 }
-
             }
         }
-
-        Write-Host "RINOMINATI " $n_file " FILES"
+        Separator
+        Read-Host "RINOMINATI " $n_file " FILES.`nPREMERE INVIO PER CONTINUARE"|Out-Null
         return 0
     } else {
         Separator
@@ -646,12 +671,12 @@ function MoveFile {
         $keep_alive = $true
         do {
             # Il numero selezionato corrisponde ad (indice_array + 1)
-            # Per brevità, si usa un semplice contatore sottraendo 1
+            # Per brevità, si usa un contatore sottraendo 1
             try {
-                [int]$col_num = Read-Host "`nInserire il numero della colonna dei nomi dei FILES DA SPOSTARE"
+                [int]$col_num = Read-Host "`nInserire il numero della colonna dei FILES DA SPOSTARE"
                 if ($col_num -ge 1 -and $col_num -le $count) {
-                    $name_col = $csv[0].psobject.properties.name[$col_num -1] # prelevo il valore dall'array
-                    Write-Host ("`n`t`tCOLONNA SELEZIONATA >> " + "`"" + $name_col + "`"")
+                    $files_col = $csv[0].psobject.properties.name[$col_num -1] 
+                    Write-Host ("`n`t`tCOLONNA SELEZIONATA >> " + "`"" + $files_col + "`"")
                 } else {
                     Separator
                     Write-Host "INSERIRE UN NUMERO CORRETTO"
@@ -676,7 +701,7 @@ function MoveFile {
             }
 
             Separator
-            $ans = Read-Host "Ricapitolando, i file nella colonna `"$name_col`" verranno spostati`nnelle cartelle contenute in `"$folder_col`". Se la cartella non esiste, verrà creata.`n`nProcedere?`n`n`t`t1 >> Si`n`t`t2 >> Cambio colonne`n`nDIGITARE UN NUMERO E PREMERE INVIO"
+            $ans = Read-Host "Ricapitolando, i file nella colonna `"$files_col`" verranno spostati`nnelle cartelle contenute in `"$folder_col`". Se la cartella non esiste, verra' creata.`n`nProcedere?`n`n`t`t1 >> Si`n`t`t2 >> Cambio colonne`n`nDIGITARE UN NUMERO E PREMERE INVIO"
             
             switch ($ans) {
                 1 { $keep_alive = $false; break }
@@ -689,12 +714,12 @@ function MoveFile {
             }
             
         }while($keep_alive)
-
+        
+        Separator
         Get-ChildItem -Path $folder -File | ForEach-Object {
             foreach($row in $csv){
-                # String cleaning per un confronto accurato
                 $file_name = $_.Name
-                $file_to_move = $row.$name_col
+                $file_to_move = $row.$files_col
                 $folder_name = $row.$folder_col
 
                 if (-not (Test-Path -Path ($folder + "\" + $folder_name))) {
@@ -702,13 +727,14 @@ function MoveFile {
                 }
 
                 if($file_name -eq $file_to_move){
-                    Move-Item $_.FullName $folder_name
+                    Move-Item -Path $_.FullName -Destination ($folder + "\" + $folder_name)
+                    Write-Host $_.Name "->" $folder"\"$folder_name
                     $n_file++
                 }
             }
         }
-
-        Write-Host "SPOSTATI " $n_file " FILE."
+        Separator
+        Read-Host "SPOSTATI "$n_file" FILE.`nPREMERE INVIO PER CONTINUARE" | Out-Null
     } else {
         Separator
         Write-Host "FILE NON VALIDO"
@@ -760,7 +786,7 @@ function Main {
 
         Start-Sleep 1
         Separator
-    } while ($ans -ne 4)
+    } while ($ans -ne 5)
     
     Separator
     Write-Host "...USCITA..."
