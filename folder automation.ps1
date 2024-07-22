@@ -139,13 +139,6 @@ Function Get-Folder {
         $Folder += $FolderBrowser.SelectedPath
     }
 
-    if ($FiledialogResult -eq 'Cancel') {
-        Separator
-        Write-Host "NESSUNA CARTELLA SELEZIONATA, RITORNO AL MENU' PRINCIPALE"
-        Start-Sleep 1
-        Main 0
-    }
-
     return $Folder
 }
 
@@ -311,11 +304,6 @@ function Get-FileName {
         {
             return $OpenFileDialog.Filename
         }
-    } elseif ($FiledialogResult -eq 'Cancel') {
-        Separator
-        Write-Host "NESSUNA FILE SELEZIONATO, RITORNO AL MENU' PRINCIPALE"
-        Start-Sleep 1
-        Main 0
     }
 }
 
@@ -386,6 +374,11 @@ function ListingFiles {
     Write-Host "SELEZIONARE LA CARTELLA CONTENENTE I FILES DA INDIVIDUARE"
 
     $current_folder = Get-Folder $PSScriptRoot
+
+    if ([string]::IsNullOrWhiteSpace($current_folder)) {
+        Write-Host "NESSUN FILE SELEZIONATO, RITORNO AL MENU' PRINCIPALE."
+        return 0
+    }
     
     $keep_alive = $true
 
@@ -397,7 +390,11 @@ function ListingFiles {
 
         switch ($ans) {
             1 { $keep_alive = $false; break }
-            2 { $current_folder = Get-Folder $PSScriptRoot 
+            2 { $current_folder = Get-Folder $PSScriptRoot
+                if ([string]::IsNullOrWhiteSpace($current_folder)) {
+                    Write-Host "NESSUN FILE SELEZIONATO, RITORNO AL MENU' PRINCIPALE."
+                    return 0
+                }
                 $selected_folder = $current_folder.Split('\')[-1] ; break }
             3 { return 0 }
             4 { return 4 }
@@ -474,10 +471,22 @@ function  ChangingFileNames {
     $keep_alive = $true
     Write-Host "SELEZIONARE il FILE CSV CONTENENTE I NOMI DA RINOMINARE"
     $csv_path = Get-FileName "Seleziona un file csv" $PSScriptRoot "File (*.csv)|*.csv" $false
+    
+    if ([string]::IsNullOrWhiteSpace($csv_path)) {
+        Write-Host "NESSUN FILE SELEZIONATO, RITORNO AL MENU' PRINCIPALE."
+        return 0
+    }
+
     $selected_csv = $csv_path.Split('\')[-1]
     Separator
     Write-Host "SELEZIONARE LA CARTELLA CONTENENTE I FILES"
-    $folder = Get-Folder $PSScriptRoot 
+    $folder = Get-Folder $PSScriptRoot
+
+    if ([string]::IsNullOrWhiteSpace($folder)) {
+        Write-Host "NESSUNA CARTELLA SELEZIONATA, RITORNO AL MENU' PRINCIPALE."
+        return 0
+    }
+
     $selected_folder = $folder.Split('\')[-1]
 
     do {
@@ -487,8 +496,17 @@ function  ChangingFileNames {
         switch ($ans) {
             1 { $keep_alive = $false; break }
             2 { $folder = Get-Folder $PSScriptRoot
+                if ([string]::IsNullOrWhiteSpace($folder)) {
+
+                    Write-Host "NESSUN FILE SELEZIONATO, RITORNO AL MENU' PRINCIPALE."
+                    return 0
+                }
                 $selected_folder = $folder.Split('\')[-1]; break }
             3 { [string]$csv_path = Get-FileName "Seleziona un file csv" $PSScriptRoot "File (*.csv)|*.csv" $false
+            if ([string]::IsNullOrWhiteSpace($csv_path)) {
+                Write-Host "NESSUN FILE SELEZIONATO, RITORNO AL MENU' PRINCIPALE."
+                return 0
+                }
                 $selected_csv = $csv_path.Split('\')[-1]; break }
             4 { return 0 }
             5 { return 4 }
@@ -572,36 +590,59 @@ function  ChangingFileNames {
 
         $n_file = 0
         Get-ChildItem -Path $folder -File | ForEach-Object {
+            $file_name = $_.Name
+            
             foreach($row in $csv){
                 # String cleaning per un confronto accurato
-                $file_name = $_.Name.ToString().ToLower()
-                $old_name = $row.$oldname_col.ToString().Trim().ToLower()
+                $old_name = $row.$oldname_col
 
-                if ([string]::IsNullOrWhiteSpace($file_name)) {
-                
-                    Write-Host $file_name "SALTATO POICHE' NULLO"
-                    continue
-                
-                } elseif($old_name -eq $file_name){
-                    
-                    if([string]::IsNullOrWhiteSpace($new_name)) {
-                        Write-Host `"$new_name`" "NON VALIDO COME NOME"
+                if($old_name -eq $file_name){
+                    # Inseriamo il test per il file
+                    if (-not(Test-Path -Path ($folder + "\" + $file_name))) {
+                        Write-Host $file_name "FILE NON TROVATO"
                         continue
-                    }elseif ($new_name.Contains(".")) { 
+                    } elseif ([string]::IsNullOrWhiteSpace($file_name)) {
+                    
+                        Write-Host $file_name "NOME DEL FILE NON VALIDO"
+                        continue
+                    }
+                    $new_name = $row.$new_name_col.Trim()
+
+                    if([string]::IsNullOrWhiteSpace($new_name)) {
+                        Write-Host `"$new_name`" "NOME DA ASSEGNARE VUOTO"
+                        continue
+                    }
+                    
+                    if ($new_name.Contains(".")) { 
                         $new_name = $new_name.Split(".")[0]
                     }
 
-                    $new_name = $row.$new_name_col.Trim()
                     $new_name = RemoveInvalidChars $new_name
+                    
+                    if ($new_name -eq $old_name) {
+                        continue
+                    }
+
+                    $copies = 0 # counter for already exsting copies
+                    while (Test-Path -Path ($folder + "\" + $new_name + $_.Extension)) {
+                        $copies++
+                        $new_name += "(" + $copies.ToString() + ")"
+                    }
+
                     $complete_name = "{0}{1}" -f $new_name, $_.Extension
-                    $n_file++
+                    
                     Rename-Item -Path ($folder + "\" + $_.Name) -NewName $complete_name
+                    $n_file++
                     Write-Host $_.Name "RINOMINATO IN" $complete_name
+                    break
                 }
             }
         }
+
         Separator
+
         Read-Host "RINOMINATI " $n_file " FILES.`nPREMERE INVIO PER CONTINUARE"|Out-Null
+        
         return 0
     } else {
         Separator
@@ -619,10 +660,19 @@ function MoveFile {
     $keep_alive = $true
     Write-Host "SELEZIONARE il FILE CSV CONTENENTE I NOMI DA RINOMINARE"
     $csv_path = Get-FileName "Seleziona un file csv" $PSScriptRoot "File (*.csv)|*.csv" $false
+    if ([string]::IsNullOrWhiteSpace($csv_path)) {
+        Write-Host "NESSUN FILE SELEZIONATO, RITORNO AL MENU' PRINCIPALE."
+        return 0
+    }
     $selected_csv = $csv_path.Split('\')[-1]
     Separator
     Write-Host "SELEZIONARE LA CARTELLA CONTENENTE I FILES"
-    $folder = Get-Folder $PSScriptRoot 
+    $folder = Get-Folder $PSScriptRoot
+    Write-Host $folder
+    if ([string]::IsNullOrWhiteSpace($folder)) {
+        Write-Host "NESSUNA CARTELLA SELEZIONATA, RITORNO AL MENU' PRINCIPALE."
+        return 0
+    }
     $selected_folder = $folder.Split('\')[-1]
 
     do {
@@ -715,21 +765,36 @@ function MoveFile {
             
         }while($keep_alive)
         
+        $n_file = 0
         Separator
-        Get-ChildItem -Path $folder -File | ForEach-Object {
-            foreach($row in $csv){
-                $file_name = $_.Name
-                $file_to_move = $row.$files_col
-                $folder_name = $row.$folder_col
 
-                if (-not (Test-Path -Path ($folder + "\" + $folder_name))) {
-                    New-Item -Path $folder -Name $folder_name -ItemType "directory"
-                }
-
+        [System.Collections.ArrayList]$csv = $csv
+        Get-ChildItem -Path $folder -File | ForEach-Object {            
+            $file_name = $_.Name
+            
+            # lt = less than
+            foreach ($row in $csv){
+                $file_to_move = RemoveInvalidChars $row.$files_col
+                $folder_to_move = RemoveInvalidChars $row.$folder_col
+                
                 if($file_name -eq $file_to_move){
-                    Move-Item -Path $_.FullName -Destination ($folder + "\" + $folder_name)
-                    Write-Host $_.Name "->" $folder"\"$folder_name
+                    
+                    $count = 0
+
+                    if (-not (Test-Path -Path ($folder + "\" + $folder_to_move))) {
+                        New-Item -Path $folder -Name $folder_to_move -ItemType "directory"
+                    }
+
+                    while (Test-Path -Path ($folder + "\" + $folder_to_move + $file_name)) {
+                        $count++
+                        Rename-Item -Path $_.FullName -NewName ($_.BaseName + "(" + $count + ")" + $_.Extension)
+                    }
+    
+                    Move-Item -Path $_.FullName -Destination ($folder + "\" + $folder_to_move)
+                    Write-Host $_.Name "->" $folder"\"$folder_to_move
                     $n_file++
+                    $csv.Remove($row)
+                    break
                 }
             }
         }
@@ -745,6 +810,7 @@ function MoveFile {
 function License {
 
 }
+
 function Main {
     param (
         [Parameter(
@@ -773,20 +839,21 @@ function Main {
     do{
         Clear-Host
         Separator
-        $ans = Read-Host "Selezionare l'applicazione da eseguire, e' possibile uscire`nin qualsiasi momento premendo la combinazione di tasti Ctrl + C. `nSelezionare la funzione da avviare:`n`n`t`t1 >> Generazione del file di nomi`n`t`t2 >> Rinominare in massa i file`n`t`t3 >> Spostare file`n`t`t4 >> Licenza di utilizzo`n`t`t5 >> Uscita`n`nDigitare un numero e premere invio"
+        $ans = Read-Host "Selezionare l'applicazione da eseguire, e' possibile uscire`nin qualsiasi momento premendo la combinazione di tasti Ctrl + C. `nSelezionare la funzione da avviare:`n`n`t`t1 >> Generazione del file di nomi`n`t`t2 >> Rinominare in massa i file`n`t`t3 >> Organizzare file in cartelle`n`t`t4 >> Licenza di utilizzo`n`t`t5 >> Informazioni aggiuntive`n`t`t6 >> Uscita`n`nDigitare un numero e premere invio"
         
         switch ($ans) {
             1 { $ans = ListingFiles; break }
             2 { $ans = ChangingFileNames; break }
             3 { $ans = MoveFile; break }
             4 { $ans = License; break }
-            5 {break}
+            5 { $ans = Info; break }
+            6 {break}
             Default {Write-Host "`nINSERIRE UN VALORE CORRETTO"}
         }
 
         Start-Sleep 1
         Separator
-    } while ($ans -ne 5)
+    } while ($ans -ne 6)
     
     Separator
     Write-Host "...USCITA..."
